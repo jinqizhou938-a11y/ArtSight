@@ -1,0 +1,15 @@
+{
+  "qwen": {
+    "apiKey": "your-qwen-vision-api-key-here",
+    "model": "qwen3.7-plus",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  },
+  "qwenImage": {
+    "apiKey": "your-qwen-image-api-key-here",
+    "model": "wanx2.1-t2i-turbo",
+    "baseUrl": "https://dashscope.aliyuncs.com"
+  },
+  "server": {
+    "port": 3000
+  }
+}

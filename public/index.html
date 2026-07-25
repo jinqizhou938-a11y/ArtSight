@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="拍一件艺术品，AI给你讲门道">
+  <title>艺术灵瞳</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 首页 -->
+  <div id="page-home" class="page active">
+    <div class="home-header">
+      <p class="home-eyebrow" id="homeEyebrow">AI 艺术导览</p>
+      <h1 class="logo" id="homeLogo">艺术灵瞳</h1>
+      <p class="subtitle" id="homeSubtitle">拍一件艺术品，AI给你讲门道</p>
+    </div>
+    <div class="home-content">
+
+      <!-- 两个场景入口 -->
+      <div class="scene-cards">
+        <button class="scene-card" id="sceneMuseum" type="button">
+          <span class="scene-icon" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 21h18"/>
+              <path d="M4 21V10l8-5 8 5v11"/>
+              <path d="M8 21v-6h3v6"/>
+              <path d="M13 21v-6h3v6"/>
+              <path d="M9 10h.01M15 10h.01"/>
+            </svg>
+          </span>
+          <span class="scene-label">我在美术馆看展</span>
+        </button>
+        <button class="scene-card" id="sceneDouyin" type="button">
+          <span class="scene-icon" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="2" width="12" height="20" rx="2"/>
+              <path d="M10 18h4"/>
+              <path d="M11 8l5 3-5 3V8z"/>
+            </svg>
+          </span>
+          <span class="scene-label">我在抖音刷到的</span>
+        </button>
+      </div>
+
+      <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+      <div class="demo-hint" id="demoHint">
+        <span>没有作品？试试</span>
+        <button class="demo-btn" id="demoBtn" type="button">加载示例作品</button>
+      </div>
+
+      <!-- 艺术人格进度 -->
+      <div class="persona-home" id="personaHome">
+        <div class="persona-progress-track" aria-hidden="true"><span class="persona-progress-fill" id="personaProgressFill"></span></div>
+        <p class="persona-progress" id="personaProgress">审美线索 0 / 3</p>
+        <button class="persona-unlock-btn" id="personaUnlockBtn" type="button" hidden>解锁你的艺术人格</button>
+        <button class="persona-view-btn" id="personaViewBtn" type="button" hidden>查看我的艺术人格</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 来源输入弹窗 -->
+  <div class="modal-overlay" id="venueModal">
+    <div class="modal-card">
+      <p class="modal-title" id="modalTitle">你在哪个美术馆看展？</p>
+      <input type="text" class="modal-input" id="modalInput" placeholder="输入美术馆名称…" autocomplete="off">
+      <div class="modal-actions">
+        <button class="modal-skip" id="modalSkip">跳过，直接拍照</button>
+        <button class="modal-confirm" id="modalConfirm">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载 -->
+  <div id="page-loading" class="page">
+    <div class="loading-container">
+      <div class="loading-ring"></div>
+      <p class="loading-text" id="loadingText">AI正在仔细观察这件作品...</p>
+      <p class="loading-sub">凝视作品中…</p>
+    </div>
+  </div>
+
+  <!-- 结果页 -->
+  <div id="page-result" class="page">
+    <div class="result-header">
+      <button class="back-btn" id="backBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="artwork-info">
+        <h2 class="artwork-title" id="artTitle">—</h2>
+        <p class="artwork-meta" id="artMeta">—</p>
+        <p class="artwork-venue" id="artVenue"></p>
+      </div>
+    </div>
+
+    <div class="artwork-thumb" id="artworkThumb">
+      <img id="artworkImage" src="" alt="作品预览">
+    </div>
+    <p class="source-banner" id="sourceBanner" hidden>示例作品 · 联网配图仅供演示</p>
+
+    <!-- 如果……会怎样？ -->
+    <section class="section imagine-section" id="imagineSection">
+      <h3 class="section-title">如果换成……来创作会怎样？</h3>
+      <p class="gene-hint">基于画面理解的风格重绘（非像素级图生图）</p>
+      <div class="imagine-presets" id="imaginePresets">
+        <button class="imagine-preset" data-style="梵高">梵高</button>
+        <button class="imagine-preset" data-style="毕加索">毕加索</button>
+        <button class="imagine-preset" data-style="水墨画">水墨画</button>
+        <button class="imagine-preset" data-style="浮世绘">浮世绘</button>
+      </div>
+      <div class="imagine-custom">
+        <input type="text" class="imagine-input" id="imagineInput" placeholder="或输入你喜欢的风格…" autocomplete="off">
+        <button class="imagine-go" id="imagineGo">生成</button>
+      </div>
+      <div class="imagine-loading" id="imagineLoading" style="display:none;">
+        <p class="imagine-loading-text" id="imagineLoadingText">正在创作中...</p>
+      </div>
+      <div class="imagine-result" id="imagineResult" style="display:none;">
+        <img class="imagine-result-img" id="imagineResultImg" src="" alt="AI创作">
+        <p class="imagine-result-label" id="imagineResultLabel"></p>
+      </div>
+    </section>
+
+    <!-- 三个必看细节 — editorial layout -->
+    <section class="section details-section">
+      <h3 class="section-title">三个值得看的细节</h3>
+      <div class="details-list" id="detailsList"></div>
+    </section>
+
+    <!-- 艺术基因图谱 -->
+    <section class="section gene-section" id="geneSection" hidden>
+      <h3 class="section-title">艺术基因图谱</h3>
+      <p class="gene-hint">点击上下游，继续探索影响链</p>
+      <div class="gene-chain" id="geneChain"></div>
+    </section>
+
+    <!-- 同类艺术家 — text flow -->
+    <section class="section artists-section">
+      <h3 class="section-title">同流派艺术家</h3>
+      <div class="artists-flow" id="artistsFlow"></div>
+    </section>
+
+    <!-- 抖音博主 — minimal rows -->
+    <section class="section douyin-section">
+      <h3 class="section-title">抖音上聊这件作品的博主</h3>
+      <div class="creators-list" id="creatorsList"></div>
+    </section>
+
+    <!-- 追问对话 -->
+    <section class="section chat-section">
+      <h3 class="section-title">还有疑问？继续追问</h3>
+      <div class="hot-questions" id="hotQuestions"></div>
+      <div class="chat-history" id="chatHistory"></div>
+      <div class="chat-input-bar">
+        <input type="text" id="chatInput" placeholder="输入你想问的..." autocomplete="off">
+        <button class="send-btn" id="sendBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <div class="share-bar">
+      <button class="persona-result-cta" id="personaResultCta" hidden>解锁你的艺术人格</button>
+      <button class="share-btn" id="shareBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        生成我的看展笔记
+      </button>
+    </div>
+  </div>
+
+  <!-- 艺术人格页 -->
+  <div id="page-persona" class="page">
+    <div class="result-header">
+      <button class="back-btn" id="personaBackBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="artwork-info">
+        <h2 class="artwork-title">你的艺术人格</h2>
+        <p class="artwork-meta" id="personaWorksMeta">基于你拍过的作品</p>
+      </div>
+    </div>
+
+    <div class="persona-hero" id="personaHero">
+      <p class="persona-en" id="personaEn">—</p>
+      <h1 class="persona-zh" id="personaZh">—</h1>
+      <p class="persona-tagline" id="personaTagline"></p>
+    </div>
+
+    <section class="section">
+      <h3 class="section-title">审美洞察</h3>
+      <p class="persona-insight" id="personaInsight"></p>
+      <ul class="persona-evidence" id="personaEvidence"></ul>
+    </section>
+
+    <section class="section">
+      <h3 class="section-title">你可能会喜欢的中国当代艺术家</h3>
+      <div class="persona-artists" id="personaArtists"></div>
+    </section>
+
+    <div class="share-bar">
+      <button class="share-btn" id="personaShareBtn">生成我的人格卡片</button>
+      <button class="persona-regen-btn" id="personaRegenBtn">重新分析</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
