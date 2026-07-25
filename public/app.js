@@ -26,6 +26,8 @@
   const demoBtn = $('demoBtn');
   const backBtn = $('backBtn');
   const loadingText = $('loadingText');
+  const loadingSub = $('loadingSub');
+  const loadingStream = $('loadingStream');
   const artTitle = $('artTitle');
   const artMeta = $('artMeta');
   const artVenue = $('artVenue');
@@ -217,32 +219,160 @@
     return String(name || '作品').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
   }
 
-  // ---- API: analyze ----
+  // ---- Loading UX (A3) + SSE (A2) + async image (A1) ----
+  let loadingTimer = null;
+
+  function stopLoadingStages() {
+    if (loadingTimer) {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    }
+  }
+
+  function startLoadingStages(stages, intervalMs) {
+    stopLoadingStages();
+    const list = stages && stages.length ? stages : ['处理中…'];
+    let i = 0;
+    if (loadingText) loadingText.textContent = list[0];
+    if (loadingSub) loadingSub.textContent = '请稍候';
+    if (loadingStream) {
+      loadingStream.hidden = true;
+      loadingStream.textContent = '';
+    }
+    loadingTimer = setInterval(() => {
+      i = (i + 1) % list.length;
+      if (loadingText) loadingText.textContent = list[i];
+    }, intervalMs || 2200);
+  }
+
+  function showStreamPreview(fullText) {
+    if (!loadingStream) return;
+    loadingStream.hidden = false;
+    const t = String(fullText || '');
+    loadingStream.textContent = t.length > 160 ? ('…' + t.slice(-160)) : t;
+    if (loadingSub) loadingSub.textContent = '已生成 ' + t.length + ' 字';
+  }
+
+  async function readSSE(response, handlers) {
+    if (!response.ok) {
+      throw new Error('请求失败 ' + response.status);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let currentEvent = 'message';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n');
+      buffer = chunks.pop() || '';
+      for (const raw of chunks) {
+        const line = raw.replace(/\r$/, '');
+        if (!line) continue;
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim();
+          continue;
+        }
+        if (!line.startsWith('data:')) continue;
+        const dataStr = line.slice(5).trim();
+        let payload = null;
+        try {
+          payload = JSON.parse(dataStr);
+        } catch (_) {
+          payload = { text: dataStr };
+        }
+        if (currentEvent === 'delta' && handlers.onDelta) handlers.onDelta(payload);
+        if (currentEvent === 'done' && handlers.onDone) handlers.onDone(payload);
+        if (currentEvent === 'error' && handlers.onError) handlers.onError(payload);
+      }
+    }
+  }
+
+  async function fetchArtworkImageAsync(meta) {
+    try {
+      const resp = await fetch('/api/fetch-artwork-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          artist: meta.artist || '',
+          title: meta.title || meta.work || '',
+          work: meta.work || meta.title || '',
+          label: meta.label || meta.title || '',
+        }),
+      });
+      const result = await resp.json();
+      if (result.success && result.data && result.data.image) {
+        return result.data.image;
+      }
+    } catch (err) {
+      console.warn('Async artwork image failed:', err);
+    }
+    return null;
+  }
+
+  function applyArtworkImage(imageData) {
+    if (!imageData) return;
+    currentImage = imageData;
+    clearThumbPlaceholder();
+    artworkImage.src = imageData;
+    artworkImage.style.display = 'block';
+    artworkThumb.style.background = '';
+    artworkThumb.style.display = '';
+    artworkThumb.style.minHeight = '';
+    if (imagineSection) imagineSection.classList.remove('is-disabled');
+    if (sourceBanner && currentResult && currentResult._source === 'fallback') {
+      sourceBanner.hidden = false;
+      sourceBanner.textContent = '示例作品 · 联网配图仅供演示';
+    } else if (sourceBanner && currentResult && currentResult._source === 'qwen-explore') {
+      sourceBanner.hidden = true;
+    }
+  }
+
+  // ---- API: analyze (stream) ----
   async function analyzeImage(imageData) {
-    loadingText.textContent = 'AI正在仔细观察这件作品...';
+    startLoadingStages([
+      '正在观察画面…',
+      '提炼三个值得看的细节…',
+      '整理基因图谱与追问…',
+    ], 2000);
     showPage(pageLoading);
 
     try {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData }),
+        body: JSON.stringify({ image: imageData, stream: true }),
       });
-      const result = await resp.json();
 
-      if (!result.success) {
-        throw new Error(result.error || '分析失败');
+      let donePayload = null;
+      let fullPreview = '';
+      await readSSE(resp, {
+        onDelta: (p) => {
+          fullPreview += (p && p.text) || '';
+          showStreamPreview(fullPreview);
+        },
+        onDone: (p) => { donePayload = p; },
+        onError: (p) => { throw new Error((p && p.error) || '识别失败'); },
+      });
+
+      if (!donePayload || !donePayload.success || !donePayload.data) {
+        throw new Error((donePayload && donePayload.error) || '分析失败');
       }
 
+      stopLoadingStages();
       exploreStack = [];
-      currentResult = result.data;
+      currentResult = donePayload.data;
       currentImage = imageData;
-      recordViewedWork(result.data);
-      renderResult(result.data);
+      recordViewedWork(donePayload.data);
+      renderResult(donePayload.data);
       showPage(pageResult);
     } catch (err) {
       console.error('Analyze error:', err);
+      stopLoadingStages();
       loadingText.textContent = '分析出错了，请重试';
+      if (loadingSub) loadingSub.textContent = err.message || '';
       setTimeout(() => showPage(pageHome), 1500);
     }
   }
@@ -457,7 +587,11 @@
   async function exploreGeneNode(node) {
     if (!node || geneExploring || !currentResult) return;
     geneExploring = true;
-    loadingText.textContent = '沿着基因链继续探索...';
+    startLoadingStages([
+      '沿着影响链检索…',
+      '生成作品解读…',
+      '整理三个细节…',
+    ], 1800);
     showPage(pageLoading);
 
     try {
@@ -465,6 +599,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          stream: true,
           node: node,
           from: {
             title: currentResult.title || '',
@@ -472,21 +607,44 @@
           },
         }),
       });
-      const result = await resp.json();
-      if (!result.success || !result.data) {
-        throw new Error(result.error || '探索失败');
+
+      let donePayload = null;
+      let fullPreview = '';
+      await readSSE(resp, {
+        onDelta: (p) => {
+          fullPreview += (p && p.text) || '';
+          showStreamPreview(fullPreview);
+        },
+        onDone: (p) => { donePayload = p; },
+        onError: (p) => { throw new Error((p && p.error) || '探索失败'); },
+      });
+
+      if (!donePayload || !donePayload.success || !donePayload.data) {
+        throw new Error((donePayload && donePayload.error) || '探索失败');
       }
 
+      stopLoadingStages();
       exploreStack.push({
         result: currentResult,
         image: currentImage,
       });
-      currentResult = result.data;
-      currentImage = result.image || null;
-      renderResult(result.data);
+      currentResult = donePayload.data;
+      currentImage = null;
+      renderResult(donePayload.data);
       showPage(pageResult);
+
+      // A1: 配图异步补上
+      fetchArtworkImageAsync({
+        artist: donePayload.data.artist || node.artist,
+        title: donePayload.data.title || node.work || node.label,
+        work: node.work || donePayload.data.title,
+        label: node.label,
+      }).then((img) => {
+        if (img && currentResult === donePayload.data) applyArtworkImage(img);
+      });
     } catch (err) {
       console.error('Explore gene error:', err);
+      stopLoadingStages();
       alert('探索失败，请稍后重试：' + (err.message || ''));
       showPage(pageResult);
     } finally {
@@ -516,7 +674,7 @@
     return div.innerHTML;
   }
 
-  // ---- Chat ----
+  // ---- Chat (stream) ----
   async function sendQuestion(question) {
     if (!question || !question.trim()) return;
     const q = question.trim();
@@ -525,11 +683,16 @@
     chatTurns.push({ role: 'user', content: q });
     chatInput.value = '';
 
+    const botEl = addChatMessage('…', 'bot');
+    botEl.classList.add('streaming');
+    let answer = '';
+
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          stream: true,
           question: q,
           history: chatTurns.slice(0, -1),
           context: {
@@ -538,16 +701,28 @@
           },
         }),
       });
-      const result = await resp.json();
 
-      if (result.success && result.data.answer) {
-        addChatMessage(result.data.answer, 'bot');
-        chatTurns.push({ role: 'assistant', content: result.data.answer });
-      } else {
-        addChatMessage('抱歉，暂时无法回答这个问题。', 'bot');
-      }
+      await readSSE(resp, {
+        onDelta: (p) => {
+          answer += (p && p.text) || '';
+          botEl.textContent = answer;
+          chatHistory.scrollTop = chatHistory.scrollHeight;
+        },
+        onDone: (p) => {
+          if (p && p.data && p.data.answer) answer = p.data.answer;
+        },
+        onError: (p) => {
+          throw new Error((p && p.error) || '回答失败');
+        },
+      });
+
+      if (!answer) answer = '抱歉，暂时无法回答这个问题。';
+      botEl.textContent = answer;
+      botEl.classList.remove('streaming');
+      chatTurns.push({ role: 'assistant', content: answer });
     } catch (err) {
-      addChatMessage('网络出了点问题，请稍后重试。', 'bot');
+      botEl.classList.remove('streaming');
+      botEl.textContent = '网络出了点问题，请稍后重试。';
     }
   }
 
@@ -557,6 +732,7 @@
     msg.textContent = text;
     chatHistory.appendChild(msg);
     chatHistory.scrollTop = chatHistory.scrollHeight;
+    return msg;
   }
 
   // ---- Venue label builder ----
@@ -900,10 +1076,9 @@
   bindFileInput(fileInputCamera);
   // Demo button
   demoBtn.addEventListener('click', async () => {
-    // Demo mode: no venue
     currentVenue = null;
     resetExploreState();
-    loadingText.textContent = '加载示例作品...';
+    startLoadingStages(['加载示例作品…', '整理看点…'], 1600);
     showPage(pageLoading);
 
     try {
@@ -919,13 +1094,23 @@
 
       if (!result.success) throw new Error(result.error || '加载失败');
 
+      stopLoadingStages();
       currentResult = result.data;
-      currentImage = result.image || null;
+      currentImage = null;
       recordViewedWork(result.data);
       renderResult(result.data);
       showPage(pageResult);
+
+      fetchArtworkImageAsync({
+        artist: result.data.artist,
+        title: result.data.title,
+        work: result.data.title,
+      }).then((img) => {
+        if (img && currentResult === result.data) applyArtworkImage(img);
+      });
     } catch (err) {
       console.error('Demo error:', err);
+      stopLoadingStages();
       loadingText.textContent = '加载失败，请重试';
       setTimeout(() => showPage(pageHome), 1500);
     }
@@ -1003,7 +1188,11 @@
       return;
     }
 
-    loadingText.textContent = '正在解读你的艺术人格...';
+    startLoadingStages([
+      '梳理你的审美线索…',
+      '提炼艺术人格…',
+      '匹配当代艺术家…',
+    ], 2000);
     showPage(pageLoading);
 
     try {
@@ -1016,10 +1205,12 @@
       if (!result.success || !result.data) {
         throw new Error(result.error || '分析失败');
       }
+      stopLoadingStages();
       renderPersona(result.data);
       showPage(pagePersona);
     } catch (err) {
       console.error('Personality error:', err);
+      stopLoadingStages();
       alert('人格分析失败：' + (err.message || '请稍后重试'));
       showPage(pageHome);
       updatePersonaEntryPoints();

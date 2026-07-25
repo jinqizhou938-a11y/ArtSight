@@ -91,12 +91,13 @@ function readBody(req) {
   });
 }
 
-async function callQwen(messages, systemPrompt) {
+async function callQwen(messages, systemPrompt, options) {
   const { apiKey, model, baseUrl } = config.qwen;
+  const maxTokens = (options && options.maxTokens) || 2048;
   const payload = {
     model,
     messages: [{ role: "system", content: systemPrompt }, ...messages],
-    max_tokens: 2048,
+    max_tokens: maxTokens,
     temperature: 0.7,
   };
   const resp = await fetch(`${baseUrl}/chat/completions`, {
@@ -113,6 +114,80 @@ async function callQwen(messages, systemPrompt) {
   }
   const data = await resp.json();
   return data.choices[0].message.content;
+}
+
+/** 流式调用；onDelta(delta, fullText) */
+async function callQwenStream(messages, systemPrompt, onDelta, options) {
+  const { apiKey, model, baseUrl } = config.qwen;
+  const maxTokens = (options && options.maxTokens) || 2048;
+  const payload = {
+    model,
+    messages: [{ role: "system", content: systemPrompt }, ...messages],
+    max_tokens: maxTokens,
+    temperature: 0.7,
+    stream: true,
+  };
+  const resp = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Qwen API error ${resp.status}: ${errText}`);
+  }
+  if (!resp.body) {
+    throw new Error("当前运行环境不支持流式响应");
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let full = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n");
+    buffer = parts.pop() || "";
+    for (const rawLine of parts) {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        const json = JSON.parse(data);
+        const delta = json.choices?.[0]?.delta?.content || "";
+        if (delta) {
+          full += delta;
+          if (onDelta) onDelta(delta, full);
+        }
+      } catch (_) {
+        // ignore partial JSON chunks
+      }
+    }
+  }
+  return full;
+}
+
+function initSSE(res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+}
+
+function sendSSE(res, event, payload) {
+  res.write("event: " + event + "\n");
+  res.write("data: " + JSON.stringify(payload) + "\n\n");
 }
 
 function parseJsonResponse(text) {
@@ -324,30 +399,52 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/api/analyze" && req.method === "POST") {
       const body = await readBody(req);
       let result;
-      let image = null;
-      // 无图：Demo「加载示例作品」走兜底，并联网配图便于风格想象
+      // 无图：Demo 立刻返回文案，配图由前端异步拉取（A1）
       if (!body.image) {
         const exclude = new Set(Array.isArray(body.excludeKeys) ? body.excludeKeys : []);
         let pool = fallback.paintings.filter((p) => !exclude.has(p.id || (p.title + "|" + p.artist)));
         if (!pool.length) pool = fallback.paintings;
         const fb = pool[Math.floor(Math.random() * pool.length)];
         result = { ...fb, _source: "fallback" };
-        image = await searchArtworkImage(
-          buildArtworkSearchQuery({ artist: fb.artist, work: fb.title, label: fb.title })
-        );
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ success: true, data: result, image: image }));
+        res.end(JSON.stringify({ success: true, data: result, image: null }));
         return;
       }
+
+      const userContent = [
+        { type: "image_url", image_url: { url: body.image } },
+        { type: "text", text: "请帮我分析这幅画，给出识别信息和三个必看细节。" },
+      ];
+
+      // 流式（A2）：边生成边推送，结束后返回解析好的 JSON
+      if (body.stream) {
+        initSSE(res);
+        try {
+          const raw = await callQwenStream(
+            [{ role: "user", content: userContent }],
+            ANALYZE_PROMPT,
+            (delta, full) => sendSSE(res, "delta", { text: delta, size: full.length }),
+            { maxTokens: 1800 }
+          );
+          result = parseJsonResponse(raw);
+          result._source = "qwen";
+          sendSSE(res, "done", { success: true, data: result });
+        } catch (err) {
+          console.warn("Qwen stream analyze failed:", err.message);
+          sendSSE(res, "error", { success: false, error: "识别失败，请稍后重试" });
+        }
+        res.end();
+        return;
+      }
+
       try {
         const raw = await callQwen(
-          [{ role: "user", content: [{ type: "image_url", image_url: { url: body.image } }, { type: "text", text: "请帮我分析这幅画，给出识别信息和三个必看细节。" }] }],
+          [{ role: "user", content: userContent }],
           ANALYZE_PROMPT
         );
         result = parseJsonResponse(raw);
         result._source = "qwen";
       } catch (err) {
-        // 真实拍照失败不再静默换成别的名画，避免「图文不符」
         console.warn("Qwen API call failed:", err.message);
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: false, error: "识别失败，请稍后重试" }));
@@ -358,7 +455,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // POST /api/explore-gene — 点击基因图谱上下游，文字再探索 + 联网配图
+    // POST /api/fetch-artwork-image — 异步配图（Demo / 基因探索）
+    if (pathname === "/api/fetch-artwork-image" && req.method === "POST") {
+      const body = await readBody(req);
+      const query = buildArtworkSearchQuery({
+        artist: body.artist,
+        work: body.work || body.title,
+        label: body.label || body.title,
+      });
+      if (!query) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: "缺少搜图关键词" }));
+        return;
+      }
+      const image = await searchArtworkImage(query);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, data: { image: image } }));
+      return;
+    }
+
+    // POST /api/explore-gene — 文字先返回；配图前端异步拉（A1）
     if (pathname === "/api/explore-gene" && req.method === "POST") {
       const body = await readBody(req);
       const node = body.node;
@@ -378,26 +494,41 @@ const server = http.createServer(async (req, res) => {
         "- 关联原因：" + (node.reason || "") + "\n" +
         "- 节点id：" + (node.id || "") + "\n\n" +
         "请以「" + nodeLabel + "」为核心对象输出 JSON。";
-      const searchQuery = buildArtworkSearchQuery(node);
 
       let result;
-      let image = null;
       try {
-        const [raw, foundImage] = await Promise.all([
-          callQwen([{ role: "user", content: userMsg }], EXPLORE_GENE_PROMPT),
-          searchArtworkImage(searchQuery),
-        ]);
+        if (body.stream) {
+          initSSE(res);
+          const raw = await callQwenStream(
+            [{ role: "user", content: userMsg }],
+            EXPLORE_GENE_PROMPT,
+            (delta, full) => sendSSE(res, "delta", { text: delta, size: full.length }),
+            { maxTokens: 1800 }
+          );
+          result = parseJsonResponse(raw);
+          result._source = "qwen-explore";
+          sendSSE(res, "done", { success: true, data: result, image: null });
+          res.end();
+          return;
+        }
+        const raw = await callQwen([{ role: "user", content: userMsg }], EXPLORE_GENE_PROMPT);
         result = parseJsonResponse(raw);
         result._source = "qwen-explore";
-        image = foundImage;
       } catch (err) {
         console.warn("Explore gene failed:", err.message);
+        if (body.stream) {
+          try {
+            sendSSE(res, "error", { success: false, error: "探索失败，请稍后重试" });
+            res.end();
+          } catch (_) {}
+          return;
+        }
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: false, error: "探索失败，请稍后重试" }));
         return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: true, data: result, image: image }));
+      res.end(JSON.stringify({ success: true, data: result, image: null }));
       return;
     }
 
@@ -478,9 +609,30 @@ const server = http.createServer(async (req, res) => {
           content: String(h.content),
         }));
       messages.push({ role: "user", content: body.question });
+
+      if (body.stream) {
+        initSSE(res);
+        try {
+          const answer = await callQwenStream(
+            messages,
+            systemPrompt,
+            (delta) => sendSSE(res, "delta", { text: delta }),
+            { maxTokens: 512 }
+          );
+          sendSSE(res, "done", { success: true, data: { answer } });
+        } catch (err) {
+          console.warn("Qwen chat stream failed:", err.message);
+          const fallbackAnswer = "抱歉，我暂时无法回答这个问题。请检查网络连接后重试。";
+          sendSSE(res, "delta", { text: fallbackAnswer });
+          sendSSE(res, "done", { success: true, data: { answer: fallbackAnswer } });
+        }
+        res.end();
+        return;
+      }
+
       let answer;
       try {
-        answer = await callQwen(messages, systemPrompt);
+        answer = await callQwen(messages, systemPrompt, { maxTokens: 512 });
       } catch (err) {
         console.warn("Qwen chat failed:", err.message);
         answer = "抱歉，我暂时无法回答这个问题。请检查网络连接后重试。";

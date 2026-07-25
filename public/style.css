@@ -583,6 +583,21 @@ body::before {
   letter-spacing: 2px;
 }
 
+.loading-stream {
+  margin: 20px auto 0;
+  max-width: 320px;
+  max-height: 88px;
+  overflow: hidden;
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(201, 169, 110, 0.55);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.loading-stream[hidden] { display: none; }
+
 /* ---------- Result Page ---------- */
 .result-header {
   display: flex;
@@ -1055,6 +1070,15 @@ body::before {
   background: var(--surface);
   color: var(--text-mid);
   border-radius: 2px 2px 2px 0;
+}
+
+.chat-msg.streaming::after {
+  content: '▍
+  margin-left: 2px;
+  animation: streamCaret 1s steps(1) infinite;
+}
+@keyframes streamCaret {
+  50% { opacity: 0; }
 }
 
 .chat-input-bar {
