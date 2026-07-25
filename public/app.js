@@ -250,7 +250,6 @@
     loadingStream.hidden = false;
     const t = String(fullText || '');
     loadingStream.textContent = t.length > 160 ? ('…' + t.slice(-160)) : t;
-    if (loadingSub) loadingSub.textContent = '已生成 ' + t.length + ' 字';
   }
 
   async function readSSE(response, handlers) {
