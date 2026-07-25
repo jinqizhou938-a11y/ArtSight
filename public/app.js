@@ -21,7 +21,8 @@
   const pageLoading = $('page-loading');
   const pageResult = $('page-result');
   const pagePersona = $('page-persona');
-  const fileInput = $('fileInput');
+  const fileInputGallery = $('fileInputGallery');
+  const fileInputCamera = $('fileInputCamera');
   const demoBtn = $('demoBtn');
   const backBtn = $('backBtn');
   const loadingText = $('loadingText');
@@ -57,6 +58,10 @@
   const personaArtists = $('personaArtists');
   const personaWorksMeta = $('personaWorksMeta');
   const sourceBanner = $('sourceBanner');
+  const imageSourceModal = $('imageSourceModal');
+  const pickCamera = $('pickCamera');
+  const pickGallery = $('pickGallery');
+  const pickCancel = $('pickCancel');
 
   // Imagine section
   const imaginePresets = $('imaginePresets');
@@ -810,6 +815,14 @@
     venueModal.classList.remove('active');
   }
 
+  function openImageSourceModal() {
+    if (imageSourceModal) imageSourceModal.classList.add('active');
+  }
+
+  function closeImageSourceModal() {
+    if (imageSourceModal) imageSourceModal.classList.remove('active');
+  }
+
   function confirmVenue() {
     const value = modalInput.value.trim();
     if (value) {
@@ -818,7 +831,7 @@
       currentVenue = null;
     }
     closeVenueModal();
-    fileInput.click();
+    openImageSourceModal();
   }
 
   modalConfirm.addEventListener('click', confirmVenue);
@@ -832,7 +845,7 @@
   modalSkip.addEventListener('click', () => {
     currentVenue = null;
     closeVenueModal();
-    fileInput.click();
+    openImageSourceModal();
   });
 
   // Close modal on overlay click
@@ -840,12 +853,31 @@
     if (e.target === venueModal) closeVenueModal();
   });
 
+  if (imageSourceModal) {
+    imageSourceModal.addEventListener('click', (e) => {
+      if (e.target === imageSourceModal) closeImageSourceModal();
+    });
+  }
+  if (pickCancel) {
+    pickCancel.addEventListener('click', closeImageSourceModal);
+  }
+  if (pickCamera && fileInputCamera) {
+    pickCamera.addEventListener('click', () => {
+      closeImageSourceModal();
+      fileInputCamera.click();
+    });
+  }
+  if (pickGallery && fileInputGallery) {
+    pickGallery.addEventListener('click', () => {
+      closeImageSourceModal();
+      fileInputGallery.click();
+    });
+  }
+
   sceneMuseum.addEventListener('click', () => openVenueModal('museum'));
   sceneDouyin.addEventListener('click', () => openVenueModal('douyin'));
 
-  // ---- File input ----
-  fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
+  async function handlePickedFile(file) {
     if (!file) return;
     try {
       const imageData = await compressImage(file);
@@ -853,9 +885,19 @@
     } catch (err) {
       alert('图片处理失败：' + (err.message || '请换一张图试试'));
     }
-    fileInput.value = '';
-  });
+  }
 
+  function bindFileInput(input) {
+    if (!input) return;
+    input.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      await handlePickedFile(file);
+      input.value = '';
+    });
+  }
+
+  bindFileInput(fileInputGallery);
+  bindFileInput(fileInputCamera);
   // Demo button
   demoBtn.addEventListener('click', async () => {
     // Demo mode: no venue
