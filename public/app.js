@@ -27,7 +27,6 @@
   const backBtn = $('backBtn');
   const loadingText = $('loadingText');
   const loadingSub = $('loadingSub');
-  const loadingStream = $('loadingStream');
   const artTitle = $('artTitle');
   const artMeta = $('artMeta');
   const artVenue = $('artVenue');
@@ -235,21 +234,10 @@
     let i = 0;
     if (loadingText) loadingText.textContent = list[0];
     if (loadingSub) loadingSub.textContent = '请稍候';
-    if (loadingStream) {
-      loadingStream.hidden = true;
-      loadingStream.textContent = '';
-    }
     loadingTimer = setInterval(() => {
       i = (i + 1) % list.length;
       if (loadingText) loadingText.textContent = list[i];
     }, intervalMs || 2200);
-  }
-
-  function showStreamPreview(fullText) {
-    if (!loadingStream) return;
-    loadingStream.hidden = false;
-    const t = String(fullText || '');
-    loadingStream.textContent = t.length > 160 ? ('…' + t.slice(-160)) : t;
   }
 
   async function readSSE(response, handlers) {
@@ -346,12 +334,8 @@
       });
 
       let donePayload = null;
-      let fullPreview = '';
       await readSSE(resp, {
-        onDelta: (p) => {
-          fullPreview += (p && p.text) || '';
-          showStreamPreview(fullPreview);
-        },
+        onDelta: () => {},
         onDone: (p) => { donePayload = p; },
         onError: (p) => { throw new Error((p && p.error) || '识别失败'); },
       });
@@ -608,12 +592,8 @@
       });
 
       let donePayload = null;
-      let fullPreview = '';
       await readSSE(resp, {
-        onDelta: (p) => {
-          fullPreview += (p && p.text) || '';
-          showStreamPreview(fullPreview);
-        },
+        onDelta: () => {},
         onDone: (p) => { donePayload = p; },
         onError: (p) => { throw new Error((p && p.error) || '探索失败'); },
       });
