@@ -1,0 +1,12 @@
+{
+  "name": "artsight",
+  "version": "1.2.0",
+  "private": true,
+  "description": "艺术灵瞳 · AI 艺术导览 H5",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

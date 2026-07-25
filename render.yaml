@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: artsight
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: QWEN_API_KEY
+        sync: false
+      - key: QWEN_IMAGE_API_KEY
+        sync: false
+      - key: QWEN_MODEL
+        value: qwen3.7-plus
+      - key: QWEN_BASE_URL
+        value: https://dashscope.aliyuncs.com/compatible-mode/v1
+      - key: QWEN_IMAGE_MODEL
+        value: wanx2.1-t2i-turbo
+      - key: QWEN_IMAGE_BASE_URL
+        value: https://dashscope.aliyuncs.com

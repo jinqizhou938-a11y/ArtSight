@@ -1,9 +1,39 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config.json');
 const fallback = require('./mock/fallback.json');
 
+function loadConfig() {
+  let file = {};
+  try {
+    file = require('./config.json');
+  } catch (_) {
+    // Render 等环境用环境变量，本地可无 config.json
+  }
+  return {
+    qwen: {
+      apiKey: process.env.QWEN_API_KEY || file.qwen?.apiKey || "",
+      model: process.env.QWEN_MODEL || file.qwen?.model || "qwen3.7-plus",
+      baseUrl:
+        process.env.QWEN_BASE_URL ||
+        file.qwen?.baseUrl ||
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    qwenImage: {
+      apiKey: process.env.QWEN_IMAGE_API_KEY || file.qwenImage?.apiKey || "",
+      model: process.env.QWEN_IMAGE_MODEL || file.qwenImage?.model || "wanx2.1-t2i-turbo",
+      baseUrl:
+        process.env.QWEN_IMAGE_BASE_URL ||
+        file.qwenImage?.baseUrl ||
+        "https://dashscope.aliyuncs.com",
+    },
+    server: {
+      port: Number(process.env.PORT || file.server?.port || 3000),
+    },
+  };
+}
+
+const config = loadConfig();
 const PORT = config.server.port || 3000;
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -555,9 +585,11 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log("🎨 艺术灵瞳已启动: http://localhost:" + PORT);
-  console.log("📸 使用手机在同一网络下访问即可体验");
+  if (!config.qwen.apiKey || !config.qwenImage.apiKey) {
+    console.warn("⚠️ 缺少 API Key：请配置环境变量 QWEN_API_KEY / QWEN_IMAGE_API_KEY，或本地 config.json");
+  }
 });
 
 
